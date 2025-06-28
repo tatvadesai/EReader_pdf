@@ -360,6 +360,16 @@
             text-align: center;
         }
 
+        /* Warning Message */
+        .warning-message {
+            background: #ff9500;
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px;
+            text-align: center;
+        }
+
         /* Empty State */
         .empty-state {
             text-align: center;
@@ -558,8 +568,8 @@
 
             const file = files[0];
             
-            // Validate file type
-            if (file.type !== 'application/pdf') {
+            // Validate file type - be more flexible with file type detection
+            if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
                 showError('Please select a PDF file.');
                 return;
             }
@@ -575,6 +585,7 @@
             try {
                 // Convert file to base64
                 const base64 = await fileToBase64(file);
+                const arrayBuffer = base64ToArrayBuffer(base64);
                 
                 // Generate unique book ID
                 const bookId = generateBookId();
@@ -591,21 +602,62 @@
                     data: base64
                 };
 
-                // Load PDF to get page count and generate thumbnail
-                const pdf = await pdfjsLib.getDocument({ data: base64ToArrayBuffer(base64) }).promise;
+                // Load PDF with enhanced error handling for scanned PDFs
+                let pdf;
+                try {
+                    pdf = await pdfjsLib.getDocument({
+                        data: arrayBuffer,
+                        password: '',
+                        verbosity: 0,
+                        cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+                        cMapPacked: true,
+                        standardFontDataUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/standard_fonts/',
+                        useSystemFonts: false,
+                        disableFontFace: false,
+                        disableAutoFetch: false,
+                        disableStream: false
+                    }).promise;
+                } catch (pdfError) {
+                    console.warn('Initial PDF load failed, trying with fallback options:', pdfError);
+                    // Try with more permissive settings for problematic PDFs
+                    pdf = await pdfjsLib.getDocument({
+                        data: arrayBuffer,
+                        password: '',
+                        verbosity: 0,
+                        disableFontFace: true,
+                        disableAutoFetch: true,
+                        disableStream: true,
+                        useSystemFonts: true,
+                        stopAtErrors: false
+                    }).promise;
+                }
+
                 bookData.totalPages = pdf.numPages;
 
-                // Generate thumbnail (first page)
-                const page = await pdf.getPage(1);
-                const canvas = document.createElement('canvas');
-                const context = canvas.getContext('2d');
-                const viewport = page.getViewport({ scale: 0.5 });
-                
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
-                
-                await page.render({ canvasContext: context, viewport: viewport }).promise;
-                bookData.thumbnail = canvas.toDataURL();
+                // Generate thumbnail (first page) with error handling
+                let thumbnailGenerated = false;
+                try {
+                    const page = await pdf.getPage(1);
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    const viewport = page.getViewport({ scale: 0.5 });
+                    
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    
+                    await page.render({ 
+                        canvasContext: context, 
+                        viewport: viewport,
+                        intent: 'display'
+                    }).promise;
+                    
+                    bookData.thumbnail = canvas.toDataURL();
+                    thumbnailGenerated = true;
+                } catch (thumbnailError) {
+                    console.warn('Thumbnail generation failed, will use default:', thumbnailError);
+                    // Don't fail the entire upload if thumbnail generation fails
+                    bookData.thumbnail = null;
+                }
 
                 // Save to localStorage
                 saveBook(bookData);
@@ -615,12 +667,29 @@
                 
                 showLoading(false);
                 
+                // Show success message
+                if (!thumbnailGenerated) {
+                    showError('PDF uploaded successfully, but thumbnail could not be generated. The book is still readable.', 'warning');
+                }
+                
                 // Reset file input
                 event.target.value = '';
                 
             } catch (error) {
                 console.error('Error processing PDF:', error);
-                showError('Failed to process PDF file. Please try again.');
+                let errorMessage = 'Failed to process PDF file.';
+                
+                if (error.message && error.message.includes('Invalid PDF')) {
+                    errorMessage = 'This PDF file appears to be corrupted or invalid.';
+                } else if (error.message && error.message.includes('password')) {
+                    errorMessage = 'This PDF is password protected. Please remove the password and try again.';
+                } else if (error.name === 'PasswordException') {
+                    errorMessage = 'This PDF requires a password. Please use an unprotected PDF.';
+                } else {
+                    errorMessage = 'Failed to process PDF. This might be a scanned or complex PDF. Try with a different file.';
+                }
+                
+                showError(errorMessage);
                 showLoading(false);
             }
         }
@@ -757,9 +826,37 @@
             showLoading(true);
 
             try {
-                // Load PDF
+                // Load PDF with enhanced settings for scanned PDFs
                 const arrayBuffer = base64ToArrayBuffer(book.data);
-                currentPDF = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                
+                try {
+                    currentPDF = await pdfjsLib.getDocument({
+                        data: arrayBuffer,
+                        password: '',
+                        verbosity: 0,
+                        cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+                        cMapPacked: true,
+                        standardFontDataUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/standard_fonts/',
+                        useSystemFonts: false,
+                        disableFontFace: false,
+                        disableAutoFetch: false,
+                        disableStream: false
+                    }).promise;
+                } catch (pdfError) {
+                    console.warn('Initial PDF open failed, trying fallback:', pdfError);
+                    // Fallback for problematic PDFs
+                    currentPDF = await pdfjsLib.getDocument({
+                        data: arrayBuffer,
+                        password: '',
+                        verbosity: 0,
+                        disableFontFace: true,
+                        disableAutoFetch: true,
+                        disableStream: true,
+                        useSystemFonts: true,
+                        stopAtErrors: false
+                    }).promise;
+                }
+                
                 totalPagesCount = currentPDF.numPages;
                 
                 // Set current page to last read page
@@ -768,6 +865,9 @@
                 // Initialize reader view
                 document.getElementById('libraryView').style.display = 'none';
                 document.getElementById('readerView').style.display = 'block';
+                
+                // Set initial zoom to fit width for better scanned PDF viewing
+                currentZoom = 'fit-width';
                 
                 // Update UI
                 document.getElementById('totalPages').textContent = totalPagesCount;
@@ -790,7 +890,17 @@
                 
             } catch (error) {
                 console.error('Error opening book:', error);
-                showError('Failed to open book. The file may be corrupted.');
+                let errorMessage = 'Failed to open book.';
+                
+                if (error.message && error.message.includes('Invalid PDF')) {
+                    errorMessage = 'This PDF file appears to be corrupted.';
+                } else if (error.name === 'PasswordException') {
+                    errorMessage = 'This PDF requires a password.';
+                } else {
+                    errorMessage = 'Failed to open book. The file may be corrupted or use unsupported features.';
+                }
+                
+                showError(errorMessage);
                 showLoading(false);
                 closeReader();
             }
@@ -826,8 +936,8 @@
                 let scale = currentZoom;
                 
                 // Apply fit mode
-                const widthScale = containerWidth / viewport.width;
-                const heightScale = containerHeight / viewport.height;
+                const widthScale = (containerWidth - 40) / viewport.width; // Leave some margin
+                const heightScale = (containerHeight - 40) / viewport.height;
                 
                 if (currentZoom === 'fit-width') {
                     scale = widthScale;
@@ -842,10 +952,21 @@
                 canvas.width = scaledViewport.width;
                 canvas.height = scaledViewport.height;
 
+                // Enhanced render context for better scanned PDF support
                 const renderContext = {
                     canvasContext: context,
-                    viewport: scaledViewport
+                    viewport: scaledViewport,
+                    intent: 'display',
+                    enableWebGL: false,
+                    renderInteractiveForms: false,
+                    transform: null,
+                    imageLayer: null,
+                    background: 'white'
                 };
+
+                // Clear canvas with white background for better scanned PDF visibility
+                context.fillStyle = 'white';
+                context.fillRect(0, 0, canvas.width, canvas.height);
 
                 await page.render(renderContext).promise;
 
@@ -861,8 +982,33 @@
 
             } catch (error) {
                 console.error('Error rendering page:', error);
-                showError('Failed to render page.');
-                showLoading(false);
+                
+                // Try fallback rendering for problematic pages
+                try {
+                    const page = await currentPDF.getPage(pageNum);
+                    const canvas = document.getElementById('pageCanvas');
+                    const context = canvas.getContext('2d');
+                    const viewport = page.getViewport({ scale: 1.0 });
+                    
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    
+                    // Simple fallback render
+                    context.fillStyle = 'white';
+                    context.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    await page.render({
+                        canvasContext: context,
+                        viewport: viewport,
+                        intent: 'print'
+                    }).promise;
+                    
+                    showLoading(false);
+                } catch (fallbackError) {
+                    console.error('Fallback rendering also failed:', fallbackError);
+                    showError('Failed to render this page. It may be corrupted or use unsupported features.');
+                    showLoading(false);
+                }
             }
         }
 
@@ -1050,23 +1196,23 @@
             document.getElementById('loading').style.display = show ? 'block' : 'none';
         }
 
-        function showError(message) {
+        function showError(message, type = 'error') {
             // Remove existing error messages
-            const existingErrors = document.querySelectorAll('.error-message');
+            const existingErrors = document.querySelectorAll('.error-message, .warning-message');
             existingErrors.forEach(error => error.remove());
 
-            // Create new error message
-            const errorDiv = document.createElement('div');
-            errorDiv.className = 'error-message';
-            errorDiv.textContent = message;
+            // Create new message
+            const messageDiv = document.createElement('div');
+            messageDiv.className = type === 'warning' ? 'warning-message' : 'error-message';
+            messageDiv.textContent = message;
             
             // Insert at the top of library view
             const libraryView = document.getElementById('libraryView');
-            libraryView.insertBefore(errorDiv, libraryView.firstChild);
+            libraryView.insertBefore(messageDiv, libraryView.firstChild);
 
             // Auto-remove after 5 seconds
             setTimeout(() => {
-                errorDiv.remove();
+                messageDiv.remove();
             }, 5000);
         }
 
