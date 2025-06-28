@@ -265,6 +265,9 @@
         let extractedPages = [];
         let currentViewPage = 1;
         let totalPages = 0;
+        let currentPDF = null;
+        let isProcessingMore = false;
+        let initialBatchSize = 30;
 
         // Initialize Gemini AI
         async function initializeGemini() {
@@ -350,22 +353,43 @@
             
             // Convert file to array buffer
             const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            currentPDF = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
             
-            totalPages = pdf.numPages;
-            extractedPages = [];
+            totalPages = currentPDF.numPages;
+            extractedPages = new Array(totalPages); // Pre-allocate array
             
-            updateStatus(`Processing ${totalPages} pages with AI...`, 10);
+            const pagesToProcess = Math.min(initialBatchSize, totalPages);
+            updateStatus(`Processing first ${pagesToProcess} pages with AI...`, 10);
 
-            // Process pages in batches of 5 to respect API limits
+            // Process only first 30 pages initially
+            await processPageRange(1, pagesToProcess);
+            
+            updateStatus('Initial processing complete!', 95);
+            
+            // Display the extracted book
+            displayExtractedBook(file.name);
+            
+            updateStatus('Ready to read!', 100);
+            setTimeout(() => {
+                document.getElementById('processingStatus').style.display = 'none';
+                document.getElementById('bookReader').style.display = 'block';
+                
+                // Show message about remaining pages if needed
+                if (totalPages > initialBatchSize) {
+                    showInfo(`Loaded first ${initialBatchSize} pages. Remaining pages will be processed as you read.`);
+                }
+            }, 1000);
+        }
+
+        async function processPageRange(startPage, endPage) {
             const batchSize = 5;
-            for (let i = 1; i <= totalPages; i += batchSize) {
-                const endPage = Math.min(i + batchSize - 1, totalPages);
+            for (let i = startPage; i <= endPage; i += batchSize) {
+                const batchEnd = Math.min(i + batchSize - 1, endPage);
                 const batchPages = [];
                 
                 // Render pages in current batch
-                for (let pageNum = i; pageNum <= endPage; pageNum++) {
-                    const page = await pdf.getPage(pageNum);
+                for (let pageNum = i; pageNum <= batchEnd; pageNum++) {
+                    const page = await currentPDF.getPage(pageNum);
                     const canvas = document.createElement('canvas');
                     const context = canvas.getContext('2d');
                     const viewport = page.getViewport({ scale: 2.0 }); // Higher resolution for better OCR
@@ -385,23 +409,14 @@
                 await processBatch(batchPages);
                 
                 // Update progress
-                const progress = 10 + (i / totalPages) * 80;
-                updateStatus(`Processed pages ${i}-${endPage} of ${totalPages}...`, progress);
+                const overallProgress = startPage === 1 ? 
+                    10 + (i / endPage) * 80 : 
+                    (i / totalPages) * 100;
+                updateStatus(`Processed pages ${i}-${batchEnd}...`, overallProgress);
                 
                 // Small delay to respect API limits
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
-            
-            updateStatus('Finalizing...', 95);
-            
-            // Display the extracted book
-            displayExtractedBook(file.name);
-            
-            updateStatus('Complete!', 100);
-            setTimeout(() => {
-                document.getElementById('processingStatus').style.display = 'none';
-                document.getElementById('bookReader').style.display = 'block';
-            }, 1000);
         }
 
         async function processBatch(batchPages) {
@@ -443,32 +458,50 @@
             document.getElementById('totalPagesSpan').textContent = totalPages;
             document.getElementById('currentPageInput').max = totalPages;
             
-            const bookContent = document.getElementById('bookContent');
-            bookContent.innerHTML = '';
-            
-            extractedPages.forEach((page, index) => {
-                if (page) {
-                    const pageDiv = document.createElement('div');
-                    pageDiv.className = 'page-content';
-                    pageDiv.id = `page-${page.pageNumber}`;
-                    
-                    const pageNumberDiv = document.createElement('div');
-                    pageNumberDiv.className = 'page-number';
-                    pageNumberDiv.textContent = `Page ${page.pageNumber}`;
-                    
-                    const pageTextDiv = document.createElement('div');
-                    pageTextDiv.className = 'page-text';
-                    pageTextDiv.textContent = page.text;
-                    
-                    pageDiv.appendChild(pageNumberDiv);
-                    pageDiv.appendChild(pageTextDiv);
-                    bookContent.appendChild(pageDiv);
-                }
-            });
+            updateDisplayedBook();
             
             currentViewPage = 1;
             document.getElementById('currentPageInput').value = 1;
             goToPage(1);
+        }
+
+        function updateDisplayedBook() {
+            const bookContent = document.getElementById('bookContent');
+            
+            // Clear existing content
+            bookContent.innerHTML = '';
+            
+            // Add all pages (processed and unprocessed)
+            for (let i = 0; i < totalPages; i++) {
+                const page = extractedPages[i];
+                const pageNumber = i + 1;
+                
+                const pageDiv = document.createElement('div');
+                pageDiv.className = 'page-content';
+                pageDiv.id = `page-${pageNumber}`;
+                
+                const pageNumberDiv = document.createElement('div');
+                pageNumberDiv.className = 'page-number';
+                pageNumberDiv.textContent = `Page ${pageNumber}`;
+                
+                const pageTextDiv = document.createElement('div');
+                pageTextDiv.className = 'page-text';
+                
+                if (page && page.text) {
+                    // Processed page
+                    pageTextDiv.textContent = page.text;
+                } else {
+                    // Unprocessed page
+                    pageDiv.style.opacity = '0.5';
+                    pageTextDiv.textContent = '[This page will be processed when you reach it...]';
+                    pageTextDiv.style.fontStyle = 'italic';
+                    pageTextDiv.style.color = '#888';
+                }
+                
+                pageDiv.appendChild(pageNumberDiv);
+                pageDiv.appendChild(pageTextDiv);
+                bookContent.appendChild(pageDiv);
+            }
         }
 
         function goToPage(pageNum) {
@@ -478,9 +511,43 @@
             currentViewPage = pageNum;
             document.getElementById('currentPageInput').value = pageNum;
             
+            // Check if we need to load more pages
+            checkAndLoadMorePages(pageNum);
+            
             const pageElement = document.getElementById(`page-${pageNum}`);
             if (pageElement) {
                 pageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else if (!extractedPages[pageNum - 1] && !isProcessingMore) {
+                showInfo(`Page ${pageNum} is being processed. Please wait...`);
+            }
+        }
+
+        async function checkAndLoadMorePages(currentPage) {
+            // If user reaches a page that's close to the end of processed content, load more
+            const loadThreshold = 5; // Start loading when 5 pages before unprocessed content
+            const processedCount = extractedPages.filter(page => page).length;
+            
+            if (currentPage >= processedCount - loadThreshold && 
+                processedCount < totalPages && 
+                !isProcessingMore) {
+                
+                isProcessingMore = true;
+                const nextBatch = Math.min(30, totalPages - processedCount); // Load next 30 pages
+                const startPage = processedCount + 1;
+                const endPage = processedCount + nextBatch;
+                
+                showInfo(`Loading pages ${startPage} to ${endPage}...`);
+                
+                try {
+                    await processPageRange(startPage, endPage);
+                    updateDisplayedBook();
+                    showInfo(`Pages ${startPage} to ${endPage} loaded successfully!`);
+                } catch (error) {
+                    console.error('Failed to load more pages:', error);
+                    showError('Failed to load more pages. Please try refreshing.');
+                }
+                
+                isProcessingMore = false;
             }
         }
 
@@ -582,6 +649,15 @@
             successDiv.textContent = message;
             document.querySelector('.container').insertBefore(successDiv, document.querySelector('.container').firstChild);
             setTimeout(() => successDiv.remove(), 3000);
+        }
+
+        function showInfo(message) {
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'success-message';
+            infoDiv.style.background = '#007AFF';
+            infoDiv.textContent = message;
+            document.querySelector('.container').insertBefore(infoDiv, document.querySelector('.container').firstChild);
+            setTimeout(() => infoDiv.remove(), 4000);
         }
 
         function resetToUpload() {
