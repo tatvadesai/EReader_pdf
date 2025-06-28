@@ -1,0 +1,70 @@
+Scanned Book E-Reader MVP - Development Plan
+Project Overview
+Build a minimal web-based e-reader for scanned PDF books with clean UI and smooth reading experience.
+Technical Stack
+
+Frontend: HTML5, CSS3, Vanilla JavaScript
+PDF Handling: PDF.js library
+Storage: Browser localStorage (no server needed)
+Deployment: Single HTML file with embedded CSS/JS
+
+Core Components
+1. File Upload System
+- HTML file input (accept=".pdf")
+- Drag & drop zone
+- File validation (PDF only, size limit 50MB)
+- Store uploaded files in localStorage as base64
+- Generate unique book IDs
+2. PDF Renderer
+- Initialize PDF.js worker
+- Load PDF from localStorage
+- Render pages to canvas elements
+- Implement page caching (current + next 2 pages)
+- Auto-fit pages to screen width
+- Maintain aspect ratio
+3. Navigation System
+- Current page state management
+- Next/Previous page functions
+- Keyboard controls (arrow keys, space)
+- Touch/swipe gestures
+- Page number input field
+- Progress bar (visual page indicator)
+4. Reading Interface
+- Full-screen toggle
+- Zoom controls (fit-width, fit-height, custom zoom)
+- Page turn animations (slide transition)
+- Hide/show UI controls on click/tap
+- Responsive design for mobile/desktop
+5. Book Library
+- List uploaded books with titles
+- Book cover extraction (first page thumbnail)
+- Delete book functionality
+- Recently opened books
+- Simple book metadata (title, page count, last read page)
+UI Layout Structure
+1. Library View: Grid of book covers + upload button
+2. Reader View: Full-screen page display + minimal controls
+3. Controls: Bottom bar with prev/next, page counter, zoom, fullscreen
+4. Settings: Brightness slider, page fit options
+Implementation Priority
+
+Phase 1: PDF upload + basic page display + navigation
+Phase 2: Touch gestures + keyboard controls + progress tracking
+Phase 3: Library management + bookmarks + settings
+Phase 4: UI polish + animations + responsive design
+
+Key Requirements
+
+Performance: Smooth 60fps page transitions
+Compatibility: Works on Chrome, Firefox, Safari, mobile browsers
+Storage: Efficient localStorage usage with compression
+Error Handling: Graceful PDF loading failures
+Accessibility: Keyboard navigation support
+
+Success Criteria
+
+Upload 20MB PDF and navigate smoothly
+Page turns complete in <200ms
+Works offline after initial load
+Intuitive single-tap/click navigation
+Clean reading experience with minimal distractions
