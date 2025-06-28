@@ -88,8 +88,25 @@ The application is designed as a self-contained HTML file with embedded assets:
 - Works locally when opened in browser (file:// protocol)
 - No server-side configuration needed
 
+## AI-Powered Features
+
+### Google Gemini Integration
+- **Text Extraction**: OCR capabilities for scanned PDF pages using Gemini Vision API
+- **Content Summarization**: AI-powered page summarization for quick content overview
+- **Batch Processing**: Process up to 25 pages at once (free tier limit)
+- **Smart Error Handling**: Graceful fallback for various PDF formats and scan qualities
+
+### AI Processing Capabilities
+- Single page text extraction with structure preservation
+- Page content summarization with key points identification
+- Multi-page batch processing with rate limiting
+- Copy-to-clipboard functionality for extracted content
+- Modal interface for displaying AI-processed results
+
 ## Changelog
 - June 28, 2025. Initial setup
+- June 28, 2025. Enhanced PDF processing for scanned documents with better error handling
+- June 28, 2025. Integrated Google Gemini AI for OCR text extraction and summarization
 
 ## User Preferences
 
