@@ -4,6 +4,17 @@ const path = require('path');
 
 const server = http.createServer((req, res) => {
     if (req.url === '/' || req.url === '/index.html') {
+        fs.readFile('ai_reader.html', 'utf8', (err, data) => {
+            if (err) {
+                res.writeHead(500);
+                res.end('Error loading file');
+                return;
+            }
+            
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end(data);
+        });
+    } else if (req.url === '/old' || req.url === '/old.html') {
         fs.readFile('index.html', 'utf8', (err, data) => {
             if (err) {
                 res.writeHead(500);

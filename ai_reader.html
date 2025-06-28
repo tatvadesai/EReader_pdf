@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Powered PDF Reader</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "@google/generative-ai": "https://esm.run/@google/generative-ai"
+        }
+    }
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .upload-section {
+            text-align: center;
+            padding: 40px;
+            border: 2px dashed #555;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            transition: border-color 0.2s;
+        }
+
+        .upload-section.dragover {
+            border-color: #007AFF;
+            background: rgba(0, 122, 255, 0.1);
+        }
+
+        .upload-btn {
+            background: #007AFF;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px;
+        }
+
+        .upload-btn:hover {
+            background: #0056b3;
+        }
+
+        .processing-status {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #444;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #007AFF;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .book-reader {
+            display: none;
+            background: #2a2a2a;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .book-header {
+            padding: 20px;
+            background: #3a3a3a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .book-title {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .book-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .control-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .control-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .book-content {
+            padding: 30px;
+            max-height: 70vh;
+            overflow-y: auto;
+            font-size: 16px;
+            line-height: 1.8;
+        }
+
+        .page-content {
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #444;
+        }
+
+        .page-number {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .page-text {
+            white-space: pre-wrap;
+        }
+
+        .navigation {
+            padding: 20px;
+            background: #3a3a3a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .page-input {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            width: 80px;
+            text-align: center;
+        }
+
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+            display: none;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid #007AFF;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: #ff3b30;
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .success-message {
+            background: #34c759;
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 style="text-align: center; margin-bottom: 30px;">AI-Powered PDF Reader</h1>
+        
+        <div class="upload-section" id="uploadSection">
+            <h3>Upload Your Scanned PDF</h3>
+            <p style="color: #888; margin: 10px 0;">AI will extract and convert all text into a readable format</p>
+            <input type="file" id="fileInput" accept=".pdf" style="display: none;" onchange="handleFileUpload(event)">
+            <button class="upload-btn" onclick="document.getElementById('fileInput').click()">Choose PDF File</button>
+            <p style="color: #666; font-size: 14px; margin-top: 10px;">Maximum file size: 50MB</p>
+        </div>
+
+        <div class="processing-status" id="processingStatus">
+            <h3>Processing PDF with AI...</h3>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <p id="statusText">Analyzing PDF structure...</p>
+        </div>
+
+        <div class="book-reader" id="bookReader">
+            <div class="book-header">
+                <div class="book-title" id="bookTitle">Extracted Book</div>
+                <div class="book-controls">
+                    <button class="control-btn" onclick="exportText()">Export Text</button>
+                    <button class="control-btn" onclick="summarizeBook()">Summarize Book</button>
+                    <button class="control-btn" onclick="resetReader()">New PDF</button>
+                </div>
+            </div>
+            
+            <div class="book-content" id="bookContent">
+                <!-- Extracted text will be displayed here -->
+            </div>
+
+            <div class="navigation">
+                <button class="control-btn" onclick="previousPage()">← Previous</button>
+                <span>Page</span>
+                <input type="number" class="page-input" id="currentPageInput" min="1" onchange="goToPage(this.value)">
+                <span>of</span>
+                <span id="totalPagesSpan">0</span>
+                <button class="control-btn" onclick="nextPage()">Next →</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+    </div>
+
+    <script>
+        // Global variables
+        let geminiModel = null;
+        let extractedPages = [];
+        let currentViewPage = 1;
+        let totalPages = 0;
+
+        // Initialize Gemini AI
+        async function initializeGemini() {
+            try {
+                const { GoogleGenerativeAI } = await import('@google/generative-ai');
+                if (GoogleGenerativeAI) {
+                    const genAI = new GoogleGenerativeAI('AIzaSyA-zHjI5dMbKAOpLCYhV7peTVGsRUMbS5I');
+                    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+                    console.log('Gemini AI initialized successfully');
+                }
+            } catch (error) {
+                console.error('Failed to initialize Gemini:', error);
+            }
+        }
+
+        // PDF.js worker setup
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeGemini();
+            setupDragAndDrop();
+        });
+
+        function setupDragAndDrop() {
+            const uploadSection = document.getElementById('uploadSection');
+            
+            uploadSection.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadSection.classList.add('dragover');
+            });
+
+            uploadSection.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                uploadSection.classList.remove('dragover');
+            });
+
+            uploadSection.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadSection.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFileUpload({ target: { files: files } });
+                }
+            });
+        }
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Validate file
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+                showError('Please select a PDF file.');
+                return;
+            }
+
+            if (file.size > 50 * 1024 * 1024) {
+                showError('File size exceeds 50MB limit.');
+                return;
+            }
+
+            if (!geminiModel) {
+                showError('AI service not ready. Please refresh the page.');
+                return;
+            }
+
+            // Start processing
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('processingStatus').style.display = 'block';
+            
+            try {
+                await processEntirePDF(file);
+            } catch (error) {
+                console.error('Processing failed:', error);
+                showError('Failed to process PDF. Please try again.');
+                resetToUpload();
+            }
+        }
+
+        async function processEntirePDF(file) {
+            updateStatus('Loading PDF...', 0);
+            
+            // Convert file to array buffer
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            
+            totalPages = pdf.numPages;
+            extractedPages = [];
+            
+            updateStatus(`Processing ${totalPages} pages with AI...`, 10);
+
+            // Process pages in batches of 5 to respect API limits
+            const batchSize = 5;
+            for (let i = 1; i <= totalPages; i += batchSize) {
+                const endPage = Math.min(i + batchSize - 1, totalPages);
+                const batchPages = [];
+                
+                // Render pages in current batch
+                for (let pageNum = i; pageNum <= endPage; pageNum++) {
+                    const page = await pdf.getPage(pageNum);
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    const viewport = page.getViewport({ scale: 2.0 }); // Higher resolution for better OCR
+                    
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    
+                    await page.render({ canvasContext: context, viewport: viewport }).promise;
+                    
+                    batchPages.push({
+                        pageNumber: pageNum,
+                        imageData: canvas.toDataURL('image/jpeg', 0.9)
+                    });
+                }
+                
+                // Process batch with AI
+                await processBatch(batchPages);
+                
+                // Update progress
+                const progress = 10 + (i / totalPages) * 80;
+                updateStatus(`Processed pages ${i}-${endPage} of ${totalPages}...`, progress);
+                
+                // Small delay to respect API limits
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            
+            updateStatus('Finalizing...', 95);
+            
+            // Display the extracted book
+            displayExtractedBook(file.name);
+            
+            updateStatus('Complete!', 100);
+            setTimeout(() => {
+                document.getElementById('processingStatus').style.display = 'none';
+                document.getElementById('bookReader').style.display = 'block';
+            }, 1000);
+        }
+
+        async function processBatch(batchPages) {
+            for (const pageData of batchPages) {
+                try {
+                    const base64Data = pageData.imageData.split(',')[1];
+                    
+                    const prompt = `Extract all text from this page exactly as it appears. Maintain paragraph structure, formatting, and line breaks. Provide clean, readable text without any additional commentary.`;
+                    
+                    const result = await geminiModel.generateContent([
+                        prompt,
+                        {
+                            inlineData: {
+                                data: base64Data,
+                                mimeType: "image/jpeg"
+                            }
+                        }
+                    ]);
+                    
+                    const extractedText = result.response.text();
+                    
+                    extractedPages[pageData.pageNumber - 1] = {
+                        pageNumber: pageData.pageNumber,
+                        text: extractedText
+                    };
+                    
+                } catch (error) {
+                    console.error(`Failed to process page ${pageData.pageNumber}:`, error);
+                    extractedPages[pageData.pageNumber - 1] = {
+                        pageNumber: pageData.pageNumber,
+                        text: `[Error extracting text from page ${pageData.pageNumber}]`
+                    };
+                }
+            }
+        }
+
+        function displayExtractedBook(filename) {
+            document.getElementById('bookTitle').textContent = filename.replace('.pdf', '');
+            document.getElementById('totalPagesSpan').textContent = totalPages;
+            document.getElementById('currentPageInput').max = totalPages;
+            
+            const bookContent = document.getElementById('bookContent');
+            bookContent.innerHTML = '';
+            
+            extractedPages.forEach((page, index) => {
+                if (page) {
+                    const pageDiv = document.createElement('div');
+                    pageDiv.className = 'page-content';
+                    pageDiv.id = `page-${page.pageNumber}`;
+                    
+                    const pageNumberDiv = document.createElement('div');
+                    pageNumberDiv.className = 'page-number';
+                    pageNumberDiv.textContent = `Page ${page.pageNumber}`;
+                    
+                    const pageTextDiv = document.createElement('div');
+                    pageTextDiv.className = 'page-text';
+                    pageTextDiv.textContent = page.text;
+                    
+                    pageDiv.appendChild(pageNumberDiv);
+                    pageDiv.appendChild(pageTextDiv);
+                    bookContent.appendChild(pageDiv);
+                }
+            });
+            
+            currentViewPage = 1;
+            document.getElementById('currentPageInput').value = 1;
+            goToPage(1);
+        }
+
+        function goToPage(pageNum) {
+            pageNum = parseInt(pageNum);
+            if (pageNum < 1 || pageNum > totalPages) return;
+            
+            currentViewPage = pageNum;
+            document.getElementById('currentPageInput').value = pageNum;
+            
+            const pageElement = document.getElementById(`page-${pageNum}`);
+            if (pageElement) {
+                pageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
+        function previousPage() {
+            if (currentViewPage > 1) {
+                goToPage(currentViewPage - 1);
+            }
+        }
+
+        function nextPage() {
+            if (currentViewPage < totalPages) {
+                goToPage(currentViewPage + 1);
+            }
+        }
+
+        async function exportText() {
+            const allText = extractedPages
+                .filter(page => page)
+                .map(page => `Page ${page.pageNumber}\n\n${page.text}`)
+                .join('\n\n---\n\n');
+            
+            const blob = new Blob([allText], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = document.getElementById('bookTitle').textContent + '.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showSuccess('Text exported successfully!');
+        }
+
+        async function summarizeBook() {
+            if (!geminiModel) return;
+            
+            showLoading(true);
+            
+            try {
+                const allText = extractedPages
+                    .filter(page => page)
+                    .map(page => page.text)
+                    .join('\n\n');
+                
+                const prompt = `Please provide a comprehensive summary of this book/document. Include:\n1. Main topic/theme\n2. Key points and concepts\n3. Important conclusions\n4. Overall structure\n\nText:\n${allText.substring(0, 10000)}...`; // Limit for API
+                
+                const result = await geminiModel.generateContent(prompt);
+                const summary = result.response.text();
+                
+                // Display summary in a new page
+                const bookContent = document.getElementById('bookContent');
+                const summaryDiv = document.createElement('div');
+                summaryDiv.className = 'page-content';
+                summaryDiv.innerHTML = `
+                    <div class="page-number">Book Summary</div>
+                    <div class="page-text">${summary}</div>
+                `;
+                bookContent.insertBefore(summaryDiv, bookContent.firstChild);
+                summaryDiv.scrollIntoView({ behavior: 'smooth' });
+                
+            } catch (error) {
+                console.error('Summarization failed:', error);
+                showError('Failed to generate summary.');
+            }
+            
+            showLoading(false);
+        }
+
+        function resetReader() {
+            document.getElementById('bookReader').style.display = 'none';
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('fileInput').value = '';
+            extractedPages = [];
+            currentViewPage = 1;
+            totalPages = 0;
+        }
+
+        function updateStatus(message, progress) {
+            document.getElementById('statusText').textContent = message;
+            document.getElementById('progressFill').style.width = progress + '%';
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.textContent = message;
+            document.querySelector('.container').insertBefore(errorDiv, document.querySelector('.container').firstChild);
+            setTimeout(() => errorDiv.remove(), 5000);
+        }
+
+        function showSuccess(message) {
+            const successDiv = document.createElement('div');
+            successDiv.className = 'success-message';
+            successDiv.textContent = message;
+            document.querySelector('.container').insertBefore(successDiv, document.querySelector('.container').firstChild);
+            setTimeout(() => successDiv.remove(), 3000);
+        }
+
+        function resetToUpload() {
+            document.getElementById('processingStatus').style.display = 'none';
+            document.getElementById('uploadSection').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
