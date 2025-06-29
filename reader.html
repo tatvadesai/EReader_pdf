@@ -464,10 +464,14 @@
         async function initializeGemini() {
             try {
                 const response = await fetch('/api/config');
+                if (!response.ok) {
+                    throw new Error('Failed to get API configuration');
+                }
+                
                 const config = await response.json();
                 
                 if (!config.geminiApiKey) {
-                    throw new Error('Gemini API key not configured');
+                    throw new Error('Gemini API key not configured in environment');
                 }
 
                 const genAI = new GoogleGenerativeAI(config.geminiApiKey);
@@ -475,7 +479,7 @@
                 console.log('Gemini AI initialized successfully');
             } catch (error) {
                 console.error('Failed to initialize Gemini AI:', error);
-                showError('Failed to initialize AI. Please check your API configuration.');
+                showError('AI not configured. Please set GEMINI_API_KEY environment variable.');
             }
         }
 
@@ -505,10 +509,24 @@
             try {
                 showProcessing('Reading PDF file...');
                 
+                // Set PDF.js worker
+                if (typeof pdfjsLib !== 'undefined') {
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                }
+                
                 // Read PDF and get basic info
                 const arrayBuffer = await file.arrayBuffer();
-                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                console.log('PDF file loaded, size:', arrayBuffer.byteLength);
+                
+                const loadingTask = pdfjsLib.getDocument({ 
+                    data: arrayBuffer,
+                    cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+                    cMapPacked: true
+                });
+                
+                const pdf = await loadingTask.promise;
                 const totalPages = pdf.numPages;
+                console.log('PDF loaded successfully, pages:', totalPages);
 
                 // Generate thumbnail from first page
                 const firstPage = await pdf.getPage(1);
@@ -561,7 +579,8 @@
 
             } catch (error) {
                 console.error('Error processing book:', error);
-                showError('Failed to process book: ' + error.message);
+                const errorMsg = error.message || 'Unknown error occurred';
+                showError('Failed to process PDF: ' + errorMsg);
                 hideProcessing();
             } finally {
                 isProcessing = false;
@@ -610,52 +629,56 @@
 
         // Extract text from pages using Gemini
         async function extractTextFromPages(bookId, pages) {
-            if (!geminiModel) return;
+            if (!geminiModel) {
+                console.error('Gemini model not initialized');
+                return;
+            }
 
             try {
-                const imageContents = pages.map(page => ({
-                    inlineData: {
-                        data: page.imageData.split(',')[1],
-                        mimeType: 'image/jpeg'
-                    }
-                }));
+                // Process pages one by one for better reliability
+                for (const page of pages) {
+                    try {
+                        const imageContent = {
+                            inlineData: {
+                                data: page.imageData.split(',')[1],
+                                mimeType: 'image/jpeg'
+                            }
+                        };
 
-                const prompt = `Extract all text from these PDF pages in order. 
-                Return clean, readable text preserving paragraphs and structure.
-                Format as JSON: {"pages": [{"pageNumber": 1, "text": "..."}, {"pageNumber": 2, "text": "..."}]}`;
+                        const prompt = `Extract all text from this PDF page. Return only the readable text content, preserving paragraph structure. If there's no readable text, return "No text found".`;
 
-                const result = await geminiModel.generateContent([
-                    prompt,
-                    ...imageContents
-                ]);
+                        const result = await geminiModel.generateContent([
+                            prompt,
+                            imageContent
+                        ]);
 
-                const responseText = result.response.text();
-                let extractedData;
-                
-                try {
-                    extractedData = JSON.parse(responseText);
-                } catch {
-                    // Fallback: treat as single page
-                    extractedData = {
-                        pages: pages.map((page, index) => ({
-                            pageNumber: page.pageNumber,
-                            text: index === 0 ? responseText : ''
-                        }))
-                    };
-                }
+                        const responseText = result.response.text();
+                        const cleanText = responseText.trim();
 
-                // Save extracted text to database
-                for (const pageData of extractedData.pages) {
-                    if (pageData.text && pageData.text.trim()) {
-                        await fetch('/api/pages', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                bookId: bookId,
-                                pageNumber: pageData.pageNumber,
-                                extractedText: pageData.text.trim()
-                            })
-                        });
+                        if (cleanText && cleanText !== "No text found") {
+                            // Save extracted text to database
+                            const response = await fetch('/api/pages', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    bookId: bookId,
+                                    pageNumber: page.pageNumber,
+                                    extractedText: cleanText
+                                })
+                            });
+
+                            if (!response.ok) {
+                                console.error(`Failed to save page ${page.pageNumber}`);
+                            } else {
+                                console.log(`Page ${page.pageNumber} processed successfully`);
+                            }
+                        }
+
+                        // Small delay between pages to respect API limits
+                        await new Promise(resolve => setTimeout(resolve, 200));
+
+                    } catch (pageError) {
+                        console.error(`Error processing page ${page.pageNumber}:`, pageError);
                     }
                 }
 
@@ -666,6 +689,7 @@
 
             } catch (error) {
                 console.error('Error extracting text:', error);
+                showError('Failed to extract text from pages. Please try again.');
             }
         }
 
