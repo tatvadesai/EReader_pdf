@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Reader Lite - {{ filename }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body>
+    <div class="reader-container">
+        <div class="pdf-controls">
+            <button id="prev-page-btn" onclick="onPrevPage()">Previous</button>
+            <span>Page <span id="page-num"></span> of <span id="page-count"></span></span>
+            <button id="next-page-btn" onclick="onNextPage()">Next</button>
+            <button id="toggle-pdf-btn" onclick="togglePdfVisibility()">Show PDF</button>
+        </div>
+        <div id="pdf-viewer" class="hidden">
+            <canvas id="pdf-canvas"></canvas>
+        </div>
+        <div class="ocr-section">
+            <h1>Extracted Text</h1>
+            <div class="content">
+                <p id="extracted-text-display">Loading text...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Pass Flask variables to JavaScript
+        const pdfUrl = "{{ url_for('uploaded_file', filename=filename) }}";
+        const geminiApiKey = "{{ gemini_api_key }}";
+        const geminiModelName = "{{ gemini_model }}";
+
+        // PDF.js setup
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        let pdfDoc = null;
+        let pageNum = 1;
+        let pageRendering = false;
+        let pageNumPending = null;
+        const scale = 2.0; // Increased scale for better rendering
+        const canvas = document.getElementById('pdf-canvas');
+        const ctx = canvas.getContext('2d');
+        const pageNumSpan = document.getElementById('page-num');
+        const pageCountSpan = document.getElementById('page-count');
+        const extractedTextDisplay = document.getElementById('extracted-text-display');
+
+        // Initial page range (from form on index.html, not directly passed here)
+        // We'll assume the user wants to view the whole document initially, or we can add form fields here later.
+        let startPage = 1; 
+        let endPage = 1; // Will be updated with pdfDoc.numPages
+
+        /**
+         * Get page info from document, resize canvas accordingly, and render page.
+         * @param num Page number.
+         */
+        async function renderPage(num) {
+            pageRendering = true;
+            extractedTextDisplay.textContent = "Loading text...";
+
+            const page = await pdfDoc.getPage(num);
+            const viewport = page.getViewport({ scale: scale });
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+
+            const renderContext = {
+                canvasContext: ctx,
+                viewport: viewport
+            };
+            await page.render(renderContext).promise;
+            pageRendering = false;
+
+            if (pageNumPending !== null) {
+                renderPage(pageNumPending);
+                pageNumPending = null;
+            }
+
+            pageNumSpan.textContent = num;
+
+            // --- Text Extraction Logic ---
+            let extractedText = '';
+            try {
+                const textContent = await page.getTextContent();
+                if (textContent.items.length > 0) {
+                    // Get page dimensions. The origin (0,0) is the bottom-left corner.
+                    const pageHeight = page.view[3] - page.view[1];
+                    // Define margins to cut off top and bottom 12% of the page for headers/footers
+                    const bottomMarginThreshold = page.view[1] + pageHeight * 0.12;
+                    const topMarginThreshold = page.view[3] - pageHeight * 0.12;
+
+                    const filteredItems = textContent.items.filter(item => {
+                        const y = item.transform[5];
+                        // Also filter out very short text items that are likely page numbers or artifacts
+                        const isLikelyArtifact = item.str.trim().length > 0 && item.str.trim().length < 4;
+                        return y > bottomMarginThreshold && y < topMarginThreshold && !isLikelyArtifact;
+                    });
+
+                    extractedText = filteredItems.map(item => item.str).join(' ');
+                }
+            } catch (e) {
+                console.error("Error extracting text content from PDF.js:", e);
+            }
+
+            if (extractedText.trim() === '') {
+                // No text layer found, perform image-based OCR via backend
+                console.log("No text layer found, sending image to backend for OCR...");
+                try {
+                    const imageData = canvas.toDataURL('image/jpeg', 0.9).split(',')[1]; // Base64 without prefix
+                    const prompt = "Extract the main body of text from this page. Ignore any headers or footers. These might be at the top or bottom of the page and could include page numbers, chapter titles, or book titles. Preserve original formatting, line breaks, and punctuation as accurately as possible. Infer and include paragraph breaks where appropriate. Do not add any additional commentary or formatting beyond the extracted text.";
+
+                    const response = await fetch('/api/ocr_image', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            image_data: imageData,
+                            prompt: prompt
+                        })
+                    });
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        extractedText = data.processed_text;
+                    } else {
+                        extractedText = `Error from Gemini OCR: ${data.error || 'Unknown error'}`;
+                        console.error("Gemini OCR error:", data.error);
+                    }
+                } catch (e) {
+                    extractedText = `Failed to perform Gemini OCR: ${e.message}`;
+                    console.error("Failed to perform Gemini OCR:", e);
+                }
+            }
+            
+            extractedTextDisplay.textContent = extractedText;
+        }
+
+        function queueRenderPage(num) {
+            if (pageRendering) {
+                pageNumPending = num;
+            } else {
+                renderPage(num);
+            }
+        }
+
+        function onPrevPage() {
+            if (pageNum <= startPage) { // Use startPage for navigation limit
+                return;
+            }
+            pageNum--;
+            queueRenderPage(pageNum);
+        }
+
+        function onNextPage() {
+            if (pageNum >= endPage) { // Use endPage for navigation limit
+                return;
+            }
+            pageNum++;
+            queueRenderPage(pageNum);
+        }
+
+        function togglePdfVisibility() {
+            const pdfViewer = document.getElementById('pdf-viewer');
+            const toggleBtn = document.getElementById('toggle-pdf-btn');
+            if (pdfViewer.classList.contains('hidden')) {
+                pdfViewer.classList.remove('hidden');
+                toggleBtn.textContent = 'Hide PDF';
+            } else {
+                pdfViewer.classList.add('hidden');
+                toggleBtn.textContent = 'Show PDF';
+            }
+        }
+
+        // Asynchronously downloads PDF
+        pdfjsLib.getDocument(pdfUrl).promise.then(function(pdfDoc_) {
+            pdfDoc = pdfDoc_;
+            endPage = pdfDoc.numPages; // Update endPage with actual total pages
+            pageCountSpan.textContent = pdfDoc.numPages;
+            renderPage(pageNum);
+        }).catch(function(error) {
+            console.error("Error loading PDF: ", error);
+            extractedTextDisplay.textContent = `Error loading PDF: ${error.message}. Please go back and re-upload.`;
+        });
+
+    </script>
+</body>
+</html>
