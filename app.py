@@ -34,58 +34,36 @@ def index():
     selected_model = session.get('gemini_model', 'gemini-pro-vision')
     return render_template('index.html', api_key_set=api_key_set, models=models, selected_model=selected_model)
 
-@app.route('/set_api_key', methods=['POST'])
-def set_api_key():
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    # Check for optional API key
     api_key = request.form.get('api_key')
     if api_key:
         session['gemini_api_key'] = api_key
-        # Try to set a default model if not already set
-        if 'gemini_model' not in session:
-            try:
-                genai.configure(api_key=api_key)
-                for m in genai.list_models():
-                    if 'generateContent' in m.supported_generation_methods and 'vision' in m.name:
-                        session['gemini_model'] = m.name
-                        break
-            except Exception as e:
-                print(f"Error setting default model: {e}")
-    return redirect(url_for('index'))
+        # Always use the vision model when a key is provided
+        session['gemini_model'] = 'gemini-pro-vision'
+    else:
+        # Clear any old key if the user is doing a standard upload
+        session.pop('gemini_api_key', None)
+        session.pop('gemini_model', None)
 
-@app.route('/set_gemini_model', methods=['POST'])
-def set_gemini_model():
-    model_name = request.form.get('model_name')
-    if model_name:
-        session['gemini_model'] = model_name
-    return redirect(url_for('index'))
-
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    if 'gemini_api_key' not in session:
-        return redirect(url_for('index')) # Redirect to set API key if not present
-    if 'gemini_model' not in session:
-        return redirect(url_for('index')) # Redirect to set model if not present
-
+    # Standard file handling
     if 'file' not in request.files:
         return redirect(request.url)
     file = request.files['file']
     if file.filename == '':
         return redirect(request.url)
     if file and allowed_file(file.filename):
-        filename = file.filename.replace(' ', '_') # Replace spaces with underscores
+        filename = file.filename.replace(' ', '_')
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        print(f"[DEBUG] File saved to: {filepath}")
         return redirect(url_for('read_pdf', filename=filename))
     return 'Invalid file type'
 
 @app.route('/read/<filename>')
 def read_pdf(filename):
-    if 'gemini_api_key' not in session:
-        return redirect(url_for('index')) # Redirect to set API key if not present
-    if 'gemini_model' not in session:
-        return redirect(url_for('index')) # Redirect to set model if not present
-
-    # Pass API key and selected model to the client-side
+    # Pass API key and model to the client-side. 
+    # The template handles cases where these are not set in the session.
     return render_template('reader.html', 
                            filename=filename, 
                            gemini_api_key=session.get('gemini_api_key'),

@@ -11,7 +11,11 @@
     <div class="reader-container">
         <div class="pdf-controls">
             <button id="prev-page-btn" onclick="onPrevPage()">Previous</button>
-            <span>Page <span id="page-num"></span> of <span id="page-count"></span></span>
+            <span>
+                Page 
+                <input type="number" id="page-num-input" min="1" onchange="goToPage()">
+                 of <span id="page-count"></span>
+            </span>
             <button id="next-page-btn" onclick="onNextPage()">Next</button>
             <button id="toggle-pdf-btn" onclick="togglePdfVisibility()">Show PDF</button>
         </div>
@@ -44,6 +48,7 @@
         const ctx = canvas.getContext('2d');
         const pageNumSpan = document.getElementById('page-num');
         const pageCountSpan = document.getElementById('page-count');
+        const pageNumInput = document.getElementById('page-num-input');
         const extractedTextDisplay = document.getElementById('extracted-text-display');
 
         // Initial page range (from form on index.html, not directly passed here)
@@ -76,7 +81,11 @@
                 pageNumPending = null;
             }
 
-            pageNumSpan.textContent = num;
+            const pageNumSpan = document.getElementById('page-num');
+            if (pageNumSpan) {
+                pageNumSpan.textContent = num;
+            }
+            pageNumInput.value = num;
 
             // --- Text Extraction Logic ---
             let extractedText = '';
@@ -141,6 +150,14 @@
                 pageNumPending = num;
             } else {
                 renderPage(num);
+            }
+        }
+
+        function goToPage() {
+            const num = parseInt(pageNumInput.value);
+            if (num >= 1 && num <= pdfDoc.numPages) {
+                pageNum = num;
+                queueRenderPage(pageNum);
             }
         }
 

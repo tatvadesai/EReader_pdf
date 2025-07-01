@@ -8,31 +8,50 @@
 </head>
 <body>
     <div class="container">
-        <h1>E-Reader Lite</h1>
-        {% if not api_key_set %}
-        <form action="/set_api_key" method="post">
-            <label for="api_key">Gemini API Key:</label>
-            <input type="text" id="api_key" name="api_key" placeholder="Enter your Gemini API Key">
-            <input type="submit" value="Set API Key">
-        </form>
-        {% else %}
-        <h2>Select Gemini Model</h2>
-        <form action="/set_gemini_model" method="post">
-            <label for="model_name">Choose Model:</label>
-            <select name="model_name" id="model_name">
-                {% for model in models %}
-                <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>{{ model }}</option>
-                {% endfor %}
-            </select>
-            <input type="submit" value="Set Model">
-        </form>
+        <div class="header">
+            <h1>E-Reader Lite</h1>
+            <p class="subtitle">Your intelligent reading companion.</p>
+        </div>
 
-        <h2>Upload PDF</h2>
-        <form action="/upload" method="post" enctype="multipart/form-data">
-            <input type="file" name="file" accept=".pdf">
-            <input type="submit" value="Upload">
+        <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
+            <div class="upload-box">
+                <input type="file" name="file" id="file-input" accept=".pdf" required onchange="handleFileSelect(this)">
+                <label for="file-input" class="upload-label">
+                    <span class="upload-icon">&#8686;</span>
+                    <span class="upload-text" id="upload-text">Choose a PDF or drop it here</span>
+                </label>
+            </div>
+
+            <div class="advanced-options">
+                <a href="#" id="advanced-options-toggle">Advanced Options</a>
+                <div id="api-key-form" class="hidden">
+                    <p>For scanned documents, a Gemini API key can improve text extraction.</p>
+                    <input type="text" name="api_key" placeholder="Enter Gemini API Key">
+                </div>
+            </div>
+
+            <button type="submit" id="submit-btn" class="hidden">Start Reading</button>
         </form>
-        {% endif %}
     </div>
+
+    <script>
+        document.getElementById('advanced-options-toggle').addEventListener('click', function(e) {
+            e.preventDefault();
+            var form = document.getElementById('api-key-form');
+            form.classList.toggle('hidden');
+        });
+
+        function handleFileSelect(input) {
+            const uploadText = document.getElementById('upload-text');
+            const submitBtn = document.getElementById('submit-btn');
+            if (input.files && input.files.length > 0) {
+                uploadText.textContent = `Selected: ${input.files[0].name}`;
+                submitBtn.classList.remove('hidden');
+            } else {
+                uploadText.textContent = 'Choose a PDF or drop it here';
+                submitBtn.classList.add('hidden');
+            }
+        }
+    </script>
 </body>
 </html>
