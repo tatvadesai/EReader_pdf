@@ -18,19 +18,73 @@
             </span>
             <button id="next-page-btn" onclick="onNextPage()">Next</button>
             <button id="toggle-pdf-btn" onclick="togglePdfVisibility()">Show PDF</button>
+            <button id="toggle-display-settings">Display Settings</button>
         </div>
+
+        <div id="display-settings-container" class="hidden">
+            <div class="settings-row">
+                <label>Font Size:</label>
+                <button id="font-size-decrease">A-</button>
+                <button id="font-size-increase">A+</button>
+            </div>
+            <div class="settings-row">
+                <label>Line Spacing:</label>
+                <button id="line-height-decrease">Line -</button>
+                <button id="line-height-increase">Line +</button>
+            </div>
+            <div class="settings-row">
+                <label>Margins:</label>
+                <button id="margin-decrease">Margin -</button>
+                <button id="margin-increase">Margin +</button>
+            </div>
+            <div class="settings-row">
+                <label>Font Family:</label>
+                <select id="font-family-select">
+                    <option value="Georgia, serif">Georgia (Serif)</option>
+                    <option value="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">System Sans-serif</option>
+                    <option value="Palatino, 'Palatino Linotype', 'Book Antiqua', serif">Palatino (Serif)</option>
+                    <option value="Merriweather, serif">Merriweather (Serif)</option>
+                    <option value="Open Sans, sans-serif">Open Sans (Sans-serif)</option>
+                </select>
+            </div>
+            <div class="settings-row">
+                <label>Alignment:</label>
+                <button id="align-left">Align Left</button>
+                <button id="align-justify">Justify</button>
+                <button id="align-center">Align Center</button>
+            </div>
+            <div class="settings-row">
+                <label>Theme:</label>
+                <button id="theme-light">Light</button>
+                <button id="theme-sepia">Sepia</button>
+                <button id="theme-dark">Dark</button>
+            </div>
+        </div>
+
         <div id="pdf-viewer" class="hidden">
             <canvas id="pdf-canvas"></canvas>
         </div>
         <div class="ocr-section">
-            <h1>Extracted Text</h1>
-            <div class="content">
-                <p id="extracted-text-display">Loading text...</p>
+            <div class="content" id="extracted-text-display">
+                Loading text...
             </div>
+        </div>
+
+        <div id="annotation-toolbar" class="hidden">
+            <button id="highlight-btn">Highlight</button>
+            <button id="note-btn">Add Note</button>
         </div>
     </div>
 
     <script>
+        // Constants for settings ranges
+        const FONT_SIZE_MIN = 0.8;
+        const FONT_SIZE_MAX = 2.0;
+        const LINE_HEIGHT_MIN = 1.2;
+        const LINE_HEIGHT_MAX = 2.5;
+        const PADDING_MIN = 10;
+        const PADDING_MAX = 80;
+
         // Pass Flask variables to JavaScript
         const pdfUrl = "{{ url_for('uploaded_file', filename=filename) }}";
         const geminiApiKey = "{{ gemini_api_key }}";
@@ -44,22 +98,124 @@
         let pageRendering = false;
         let pageNumPending = null;
         const scale = 2.0; // Increased scale for better rendering
+
+        // DOM Elements
         const canvas = document.getElementById('pdf-canvas');
         const ctx = canvas.getContext('2d');
         const pageNumSpan = document.getElementById('page-num');
         const pageCountSpan = document.getElementById('page-count');
         const pageNumInput = document.getElementById('page-num-input');
         const extractedTextDisplay = document.getElementById('extracted-text-display');
+        const pdfViewer = document.getElementById('pdf-viewer');
+        const togglePdfBtn = document.getElementById('toggle-pdf-btn');
 
-        // Initial page range (from form on index.html, not directly passed here)
-        // We'll assume the user wants to view the whole document initially, or we can add form fields here later.
-        let startPage = 1; 
-        let endPage = 1; // Will be updated with pdfDoc.numPages
+        // Display Settings Controls
+        const toggleDisplaySettingsBtn = document.getElementById('toggle-display-settings');
+        const displaySettingsContainer = document.getElementById('display-settings-container');
+        const fontSizeDecreaseBtn = document.getElementById('font-size-decrease');
+        const fontSizeIncreaseBtn = document.getElementById('font-size-increase');
+        const lineHeightDecreaseBtn = document.getElementById('line-height-decrease');
+        const lineHeightIncreaseBtn = document.getElementById('line-height-increase');
+        const marginDecreaseBtn = document.getElementById('margin-decrease');
+        const marginIncreaseBtn = document.getElementById('margin-increase');
+        const fontFamilySelect = document.getElementById('font-family-select');
+        const alignLeftBtn = document.getElementById('align-left');
+        const alignJustifyBtn = document.getElementById('align-justify');
+        const alignCenterBtn = document.getElementById('align-center');
+        const themeLightBtn = document.getElementById('theme-light');
+        const themeSepiaBtn = document.getElementById('theme-sepia');
+        const themeDarkBtn = document.getElementById('theme-dark');
 
-        /**
-         * Get page info from document, resize canvas accordingly, and render page.
-         * @param num Page number.
-         */
+        // Annotation Controls
+        const annotationToolbar = document.getElementById('annotation-toolbar');
+        const highlightBtn = document.getElementById('highlight-btn');
+        const noteBtn = document.getElementById('note-btn');
+        let currentSelection = null; // To store the current text selection
+
+        // Initial settings from localStorage or defaults
+        let currentFontSize = parseFloat(localStorage.getItem('readerFontSize')) || 1.15;
+        let currentLineHeight = parseFloat(localStorage.getItem('readerLineHeight')) || 1.7;
+        let currentPadding = parseFloat(localStorage.getItem('readerPadding')) || 25;
+        let currentFontFamily = localStorage.getItem('readerFontFamily') || 'Georgia, serif';
+        let currentTextAlign = localStorage.getItem('readerTextAlign') || 'left';
+        let currentTheme = localStorage.getItem('readerTheme') || 'theme-light';
+
+        // Apply initial settings
+        extractedTextDisplay.style.fontSize = `${currentFontSize}em`;
+        extractedTextDisplay.style.lineHeight = `${currentLineHeight}`;
+        extractedTextDisplay.style.padding = `${currentPadding}px`;
+        extractedTextDisplay.style.fontFamily = currentFontFamily;
+        extractedTextDisplay.style.textAlign = currentTextAlign;
+        setTheme(currentTheme);
+        fontFamilySelect.value = currentFontFamily; // Set dropdown to current value
+
+        // --- Event Listeners for Display Settings ---
+        toggleDisplaySettingsBtn.addEventListener('click', () => {
+            displaySettingsContainer.classList.toggle('hidden');
+        });
+
+        fontSizeDecreaseBtn.addEventListener('click', () => {
+            currentFontSize = Math.max(FONT_SIZE_MIN, currentFontSize - 0.1);
+            extractedTextDisplay.style.fontSize = `${currentFontSize}em`;
+            localStorage.setItem('readerFontSize', currentFontSize);
+        });
+
+        fontSizeIncreaseBtn.addEventListener('click', () => {
+            currentFontSize = Math.min(FONT_SIZE_MAX, currentFontSize + 0.1);
+            extractedTextDisplay.style.fontSize = `${currentFontSize}em`;
+            localStorage.setItem('readerFontSize', currentFontSize);
+        });
+
+        lineHeightDecreaseBtn.addEventListener('click', () => {
+            currentLineHeight = Math.max(LINE_HEIGHT_MIN, currentLineHeight - 0.1);
+            extractedTextDisplay.style.lineHeight = `${currentLineHeight}`;
+            localStorage.setItem('readerLineHeight', currentLineHeight);
+        });
+
+        lineHeightIncreaseBtn.addEventListener('click', () => {
+            currentLineHeight = Math.min(LINE_HEIGHT_MAX, currentLineHeight + 0.1);
+            extractedTextDisplay.style.lineHeight = `${currentLineHeight}`;
+            localStorage.setItem('readerLineHeight', currentLineHeight);
+        });
+
+        marginDecreaseBtn.addEventListener('click', () => {
+            currentPadding = Math.max(PADDING_MIN, currentPadding - 5);
+            extractedTextDisplay.style.padding = `${currentPadding}px`;
+            localStorage.setItem('readerPadding', currentPadding);
+        });
+
+        marginIncreaseBtn.addEventListener('click', () => {
+            currentPadding = Math.min(PADDING_MAX, currentPadding + 5);
+            extractedTextDisplay.style.padding = `${currentPadding}px`;
+            localStorage.setItem('readerPadding', currentPadding);
+        });
+
+        fontFamilySelect.addEventListener('change', () => {
+            extractedTextDisplay.style.fontFamily = fontFamilySelect.value;
+            localStorage.setItem('readerFontFamily', fontFamilySelect.value);
+        });
+
+        alignLeftBtn.addEventListener('click', () => setTextAlign('left'));
+        alignJustifyBtn.addEventListener('click', () => setTextAlign('justify'));
+        alignCenterBtn.addEventListener('click', () => setTextAlign('center'));
+
+        themeLightBtn.addEventListener('click', () => setTheme('theme-light'));
+        themeSepiaBtn.addEventListener('click', () => setTheme('theme-sepia'));
+        themeDarkBtn.addEventListener('click', () => setTheme('theme-dark'));
+
+        // --- Helper Functions for Display Settings ---
+        function setTextAlign(alignment) {
+            extractedTextDisplay.style.textAlign = alignment;
+            localStorage.setItem('readerTextAlign', alignment);
+        }
+
+        function setTheme(theme) {
+            document.body.className = ''; // Clear existing themes
+            document.body.classList.add(theme);
+            localStorage.setItem('readerTheme', theme);
+        }
+
+        // --- PDF Rendering and Navigation ---
         async function renderPage(num) {
             pageRendering = true;
             extractedTextDisplay.textContent = "Loading text...";
@@ -81,7 +237,6 @@
                 pageNumPending = null;
             }
 
-            const pageNumSpan = document.getElementById('page-num');
             if (pageNumSpan) {
                 pageNumSpan.textContent = num;
             }
@@ -92,15 +247,12 @@
             try {
                 const textContent = await page.getTextContent();
                 if (textContent.items.length > 0) {
-                    // Get page dimensions. The origin (0,0) is the bottom-left corner.
                     const pageHeight = page.view[3] - page.view[1];
-                    // Define margins to cut off top and bottom 12% of the page for headers/footers
                     const bottomMarginThreshold = page.view[1] + pageHeight * 0.12;
                     const topMarginThreshold = page.view[3] - pageHeight * 0.12;
 
                     const filteredItems = textContent.items.filter(item => {
                         const y = item.transform[5];
-                        // Also filter out very short text items that are likely page numbers or artifacts
                         const isLikelyArtifact = item.str.trim().length > 0 && item.str.trim().length < 4;
                         return y > bottomMarginThreshold && y < topMarginThreshold && !isLikelyArtifact;
                     });
@@ -112,10 +264,9 @@
             }
 
             if (extractedText.trim() === '') {
-                // No text layer found, perform image-based OCR via backend
                 console.log("No text layer found, sending image to backend for OCR...");
                 try {
-                    const imageData = canvas.toDataURL('image/jpeg', 0.9).split(',')[1]; // Base64 without prefix
+                    const imageData = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
                     const prompt = "Extract the main body of text from this page. Ignore any headers or footers. These might be at the top or bottom of the page and could include page numbers, chapter titles, or book titles. Preserve original formatting, line breaks, and punctuation as accurately as possible. Infer and include paragraph breaks where appropriate. Do not add any additional commentary or formatting beyond the extracted text.";
 
                     const response = await fetch('/api/ocr_image', {
@@ -143,6 +294,7 @@
             }
             
             extractedTextDisplay.textContent = extractedText;
+            renderExistingAnnotations(); // Render annotations after text is displayed
         }
 
         function queueRenderPage(num) {
@@ -162,7 +314,7 @@
         }
 
         function onPrevPage() {
-            if (pageNum <= startPage) { // Use startPage for navigation limit
+            if (pageNum <= 1) {
                 return;
             }
             pageNum--;
@@ -170,7 +322,7 @@
         }
 
         function onNextPage() {
-            if (pageNum >= endPage) { // Use endPage for navigation limit
+            if (pageNum >= pdfDoc.numPages) {
                 return;
             }
             pageNum++;
@@ -178,22 +330,161 @@
         }
 
         function togglePdfVisibility() {
-            const pdfViewer = document.getElementById('pdf-viewer');
-            const toggleBtn = document.getElementById('toggle-pdf-btn');
             if (pdfViewer.classList.contains('hidden')) {
                 pdfViewer.classList.remove('hidden');
-                toggleBtn.textContent = 'Hide PDF';
+                togglePdfBtn.textContent = 'Hide PDF';
             } else {
                 pdfViewer.classList.add('hidden');
-                toggleBtn.textContent = 'Show PDF';
+                togglePdfBtn.textContent = 'Show PDF';
             }
+        }
+
+        // --- Annotation Functions ---
+        // Function to save annotations to localStorage
+        function saveAnnotations(annotations) {
+            localStorage.setItem(`annotations_${filename}`, JSON.stringify(annotations));
+        }
+
+        // Function to load annotations from localStorage
+        function loadAnnotations() {
+            const annotations = localStorage.getItem(`annotations_${filename}`);
+            return annotations ? JSON.parse(annotations) : [];
+        }
+
+        // Function to apply highlights to the text
+        function applyHighlight(range, note = null) {
+            const span = document.createElement('span');
+            span.classList.add('highlighted-text');
+            if (note) {
+                span.title = note; // Use title for tooltip
+                span.classList.add('has-note');
+            }
+            try {
+                range.surroundContents(span);
+            } catch (e) {
+                console.warn("Could not surround contents with span:", e);
+                return;
+            }
+
+            // Store the annotation
+            const annotations = loadAnnotations();
+            annotations.push({
+                text: span.textContent,
+                note: note,
+                startOffset: range.startOffset,
+                endOffset: range.endOffset,
+                startContainerPath: getElementPath(range.startContainer),
+                endContainerPath: getElementPath(range.endContainer),
+                page: pageNum // Store the page number
+            });
+            saveAnnotations(annotations);
+        }
+
+        // Helper to get a unique path to a DOM element
+        function getElementPath(node) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                node = node.parentNode;
+            }
+            let path = [];
+            while (node && node !== extractedTextDisplay) {
+                let sibling = node.previousSibling;
+                let count = 0;
+                while (sibling) {
+                    if (sibling.nodeType === Node.ELEMENT_NODE && sibling.nodeName === node.nodeName) {
+                        count++;
+                    }
+                    sibling = sibling.previousSibling;
+                }
+                path.unshift(`${node.nodeName.toLowerCase()}[${count}]`);
+                node = node.parentNode;
+            }
+            return path.join('/');
+        }
+
+        // Helper to get a DOM element from its path
+        function getElementByPath(path) {
+            let node = extractedTextDisplay;
+            const parts = path.split('/');
+            for (const part of parts) {
+                const match = part.match(/([a-z]+)\[(\d+)\]/);
+                if (!match) return null;
+                const tagName = match[1];
+                const index = parseInt(match[2]);
+                let count = 0;
+                let child = node.firstChild;
+                while (child) {
+                    if (child.nodeType === Node.ELEMENT_NODE && child.nodeName.toLowerCase() === tagName) {
+                        if (count === index) {
+                            node = child;
+                            break;
+                        }
+                        count++;
+                    }
+                    child = child.nextSibling;
+                }
+                if (!child) return null;
+            }
+            return node;
+        }
+
+        // Event listener for text selection
+        extractedTextDisplay.addEventListener('mouseup', (event) => {
+            const selection = window.getSelection();
+            if (selection.toString().length > 0 && extractedTextDisplay.contains(selection.anchorNode)) {
+                currentSelection = selection.getRangeAt(0);
+                const rect = currentSelection.getBoundingClientRect();
+                annotationToolbar.style.top = `${rect.top + window.scrollY - annotationToolbar.offsetHeight - 10}px`;
+                annotationToolbar.style.left = `${rect.left + (rect.width / 2) - (annotationToolbar.offsetWidth / 2)}px`;
+                annotationToolbar.classList.remove('hidden');
+            } else {
+                annotationToolbar.classList.add('hidden');
+            }
+        });
+
+        // Handle highlight button click
+        highlightBtn.addEventListener('click', () => {
+            if (currentSelection) {
+                applyHighlight(currentSelection.cloneRange());
+                annotationToolbar.classList.add('hidden');
+                window.getSelection().removeAllRanges(); // Clear selection
+            }
+        });
+
+        // Handle note button click
+        noteBtn.addEventListener('click', () => {
+            if (currentSelection) {
+                const note = prompt("Enter your note:");
+                if (note !== null) {
+                    applyHighlight(currentSelection.cloneRange(), note);
+                }
+                annotationToolbar.classList.add('hidden');
+                window.getSelection().removeAllRanges(); // Clear selection
+            }
+        });
+
+        // Function to render existing annotations on page load
+        function renderExistingAnnotations() {
+            const annotations = loadAnnotations();
+            annotations.forEach(annotation => {
+                if (annotation.page === pageNum) { // Only render for the current page
+                    const startNode = getElementByPath(annotation.startContainerPath);
+                    const endNode = getElementByPath(annotation.endContainerPath);
+
+                    if (startNode && endNode) {
+                        const range = document.createRange();
+                        range.setStart(startNode.childNodes[0] || startNode, annotation.startOffset);
+                        range.setEnd(endNode.childNodes[0] || endNode, annotation.endOffset);
+                        applyHighlight(range, annotation.note);
+                    }
+                }
+            });
         }
 
         // Asynchronously downloads PDF
         pdfjsLib.getDocument(pdfUrl).promise.then(function(pdfDoc_) {
             pdfDoc = pdfDoc_;
-            endPage = pdfDoc.numPages; // Update endPage with actual total pages
             pageCountSpan.textContent = pdfDoc.numPages;
+            pageNumInput.max = pdfDoc.numPages; // Set max for input
             renderPage(pageNum);
         }).catch(function(error) {
             console.error("Error loading PDF: ", error);
