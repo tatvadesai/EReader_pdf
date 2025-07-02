@@ -74,35 +74,7 @@ def uploaded_file(filename):
     print(f"[DEBUG] Attempting to serve file: {filename} from {app.config['UPLOAD_FOLDER']}")
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
-@app.route('/api/ocr_image', methods=['POST'])
-def ocr_image():
-    gemini_api_key = session.get('gemini_api_key')
-    gemini_model_name = session.get('gemini_model')
-    if not gemini_api_key or not gemini_model_name:
-        return jsonify({'error': 'Gemini API Key or Model not set.'}), 400
 
-    genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel(gemini_model_name)
-
-    data = request.get_json()
-    image_data_base64 = data.get('image_data')
-    prompt = data.get('prompt')
-
-    if not image_data_base64 or not prompt:
-        return jsonify({'error': 'Missing image_data or prompt.'}), 400
-
-    try:
-        image_bytes = base64.b64decode(image_data_base64)
-        image_part = {
-            'mime_type': 'image/jpeg',
-            'data': image_bytes
-        }
-        
-        response = model.generate_content([image_part, prompt])
-        return jsonify({'processed_text': response.text}), 200
-    except Exception as e:
-        print(f"Error processing image with Gemini: {e}")
-        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=os.getenv('PORT', 5000), debug=True)
