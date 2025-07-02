@@ -19,10 +19,7 @@
             <button id="next-page-btn" onclick="onNextPage()">Next</button>
             <button id="toggle-pdf-btn" onclick="togglePdfVisibility()">Show PDF</button>
             <button id="toggle-display-settings">Display Settings</button>
-            <input type="text" id="search-input" placeholder="Search...">
-            <button id="search-btn">Search</button>
-            <button id="prev-match-btn" class="hidden">Prev</button>
-            <button id="next-match-btn" class="hidden">Next</button>
+            
         </div>
 
         <div id="display-settings-container" class="hidden">
@@ -136,13 +133,7 @@
         const noteBtn = document.getElementById('note-btn');
         let currentSelection = null; // To store the current text selection
 
-        // Search Controls
-        const searchInput = document.getElementById('search-input');
-        const searchBtn = document.getElementById('search-btn');
-        const prevMatchBtn = document.getElementById('prev-match-btn');
-        const nextMatchBtn = document.getElementById('next-match-btn');
-        let searchResults = [];
-        let currentMatchIndex = -1;
+        
 
         // Initial settings from localStorage or defaults
         let currentFontSize = parseFloat(localStorage.getItem('readerFontSize')) || 1.15;
