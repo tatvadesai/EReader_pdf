@@ -251,8 +251,8 @@
                 const textContent = await page.getTextContent();
                 if (textContent.items.length > 0) {
                     const pageHeight = page.view[3] - page.view[1];
-                    const bottomMarginThreshold = page.view[1] + pageHeight * 0.12;
-                    const topMarginThreshold = page.view[3] - pageHeight * 0.12;
+                    const bottomMarginThreshold = page.view[1] + pageHeight * 0.05;
+                    const topMarginThreshold = page.view[3] - pageHeight * 0.05;
 
                     const filteredItems = textContent.items.filter(item => {
                         const y = item.transform[5];
