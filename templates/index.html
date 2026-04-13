@@ -23,11 +23,13 @@
             </div>
 
             <div class="advanced-options">
-                <a href="#" id="advanced-options-toggle">Advanced Options</a>
-                <div id="api-key-form" class="hidden">
-                    <p>For scanned documents, a Gemini API key can improve text extraction.</p>
-                    <input type="text" name="api_key" placeholder="Enter Gemini API Key">
-                </div>
+                <p class="status-line">
+                    {% if ocr_ready %}
+                        <span style="color: #34a853;">&#9679;</span> OCR ready ({{ ocr_model }})
+                    {% else %}
+                        <span style="color: #999;">&#9679;</span> Run <code>ollama pull {{ ocr_model }}</code> to enable OCR for scanned PDFs
+                    {% endif %}
+                </p>
             </div>
 
             <button type="submit" id="submit-btn" class="hidden">Start Reading</button>
@@ -35,12 +37,6 @@
     </div>
 
     <script>
-        document.getElementById('advanced-options-toggle').addEventListener('click', function(e) {
-            e.preventDefault();
-            var form = document.getElementById('api-key-form');
-            form.classList.toggle('hidden');
-        });
-
         function handleFileSelect(input) {
             const uploadText = document.getElementById('upload-text');
             const submitBtn = document.getElementById('submit-btn');
