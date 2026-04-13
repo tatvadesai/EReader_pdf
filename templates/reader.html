@@ -18,7 +18,10 @@
             </span>
             <button id="next-page-btn" onclick="onNextPage()">Next</button>
             <div class="control-spacer"></div>
-            <button id="toggle-pdf-btn" onclick="togglePdfVisibility()">Show PDF</button>
+            <div class="mode-toggle" role="group" aria-label="Reading mode">
+                <button id="mode-reader-btn" type="button">Reader</button>
+                <button id="mode-pdf-btn" type="button">PDF</button>
+            </div>
             <button id="toggle-display-settings">Settings</button>
         </div>
 
@@ -77,7 +80,7 @@
             <canvas id="pdf-canvas"></canvas>
         </div>
 
-        <div class="reading-area">
+        <div class="reading-area" id="reading-area">
             <div class="content" id="extracted-text-display">
                 Loading text...
             </div>
@@ -114,7 +117,9 @@
         const pageNumInput = document.getElementById('page-num-input');
         const extractedTextDisplay = document.getElementById('extracted-text-display');
         const pdfViewer = document.getElementById('pdf-viewer');
-        const togglePdfBtn = document.getElementById('toggle-pdf-btn');
+        const readingArea = document.getElementById('reading-area');
+        const modeReaderBtn = document.getElementById('mode-reader-btn');
+        const modePdfBtn = document.getElementById('mode-pdf-btn');
         const displaySettingsContainer = document.getElementById('display-settings-container');
         const fontFamilySelect = document.getElementById('font-family-select');
         const annotationToolbar = document.getElementById('annotation-toolbar');
@@ -135,6 +140,75 @@
         extractedTextDisplay.style.textAlign = currentTextAlign;
         setTheme(currentTheme);
         fontFamilySelect.value = currentFontFamily;
+
+        // --- Mode (Reader vs PDF) ---
+        const modeStorageKey = `readerMode_${filename}`;
+        let currentMode = localStorage.getItem(modeStorageKey) || 'reader';
+
+        function setMode(mode) {
+            currentMode = (mode === 'pdf') ? 'pdf' : 'reader';
+            localStorage.setItem(modeStorageKey, currentMode);
+
+            const showPdf = currentMode === 'pdf';
+            pdfViewer.classList.toggle('hidden', !showPdf);
+            readingArea.classList.toggle('hidden', showPdf);
+
+            modeReaderBtn.classList.toggle('active', !showPdf);
+            modePdfBtn.classList.toggle('active', showPdf);
+
+            // Keep the settings panel accessible in Reader mode only.
+            displaySettingsContainer.classList.toggle('hidden', showPdf);
+        }
+
+        modeReaderBtn.addEventListener('click', () => setMode('reader'));
+        modePdfBtn.addEventListener('click', () => setMode('pdf'));
+
+        // Keyboard shortcut: "v" toggles view (Reader <-> PDF)
+        document.addEventListener('keydown', (e) => {
+            if (e.defaultPrevented) return;
+            const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+            if (tag === 'input' || tag === 'textarea' || e.metaKey || e.ctrlKey || e.altKey) return;
+            if (e.key === 'v' || e.key === 'V') {
+                setMode(currentMode === 'pdf' ? 'reader' : 'pdf');
+            }
+        });
+
+        // --- Recents + resume ---
+        const lastPageKey = `lastPage_${filename}`;
+        const recentDocsKey = 'recentDocs_v1';
+
+        function getRecentDocs() {
+            try {
+                const raw = localStorage.getItem(recentDocsKey);
+                const list = raw ? JSON.parse(raw) : [];
+                return Array.isArray(list) ? list : [];
+            } catch {
+                return [];
+            }
+        }
+
+        function setRecentDocs(list) {
+            try {
+                localStorage.setItem(recentDocsKey, JSON.stringify(list));
+            } catch {
+                // ignore quota / private mode issues
+            }
+        }
+
+        function upsertRecentDoc(update) {
+            const list = getRecentDocs();
+            const now = Date.now();
+            const next = [
+                { ...update, lastOpenedAt: now },
+                ...list.filter(d => d && d.filename && d.filename !== update.filename)
+            ].slice(0, 20);
+            setRecentDocs(next);
+        }
+
+        function persistLastPage(n) {
+            try { localStorage.setItem(lastPageKey, String(n)); } catch {}
+            upsertRecentDoc({ filename, lastPage: n });
+        }
 
         // --- Settings Listeners ---
         document.getElementById('toggle-display-settings').addEventListener('click', () => {
@@ -213,61 +287,129 @@
             }
 
             pageNumInput.value = num;
+            persistLastPage(num);
 
-            // --- Layout-aware text extraction ---
+            // --- Layout-aware text extraction (reflow) ---
             let extractedText = '';
             try {
                 const textContent = await page.getTextContent();
-                if (textContent.items.length > 0) {
+                const itemsRaw = (textContent && textContent.items) ? textContent.items : [];
+                if (itemsRaw.length > 0) {
+                    // Light header/footer suppression (common page numbers / running headers).
                     const pageHeight = page.view[3] - page.view[1];
-                    const bottomMargin = page.view[1] + pageHeight * 0.04;
-                    const topMargin = page.view[3] - pageHeight * 0.04;
+                    const bottomMargin = page.view[1] + pageHeight * 0.06;
+                    const topMargin = page.view[3] - pageHeight * 0.06;
 
-                    const items = textContent.items
+                    const items = itemsRaw
                         .filter(item => {
+                            const s = (item.str || '').trim();
+                            if (!s) return false;
                             const y = item.transform[5];
-                            return item.str.trim().length > 0
-                                && y > bottomMargin && y < topMargin;
+                            return y > bottomMargin && y < topMargin;
                         })
-                        .map(item => ({
-                            text: item.str,
-                            x: item.transform[4],
-                            y: item.transform[5]
-                        }));
+                        .map(item => {
+                            const text = (item.str || '').replace(/\s+/g, ' ').trim();
+                            const x = item.transform[4];
+                            const y = item.transform[5];
+                            const w = typeof item.width === 'number' ? item.width : 0;
+                            const charW = text.length > 0 && w > 0 ? (w / text.length) : 0;
+                            return { text, x, y, w, charW };
+                        })
+                        .filter(it => it.text.length > 0);
 
                     if (items.length > 0) {
+                        // Cluster into lines using an adaptive tolerance (PDFs vary wildly).
                         items.sort((a, b) => b.y - a.y || a.x - b.x);
+                        const charWs = items.map(i => i.charW).filter(v => v > 0).sort((a, b) => a - b);
+                        const medianCharW = charWs.length ? charWs[Math.floor(charWs.length / 2)] : 3;
+                        const yTol = Math.max(2.5, Math.min(6, medianCharW * 1.1));
 
+                        /** @type {Array<{y:number, runs:Array<any>}>} */
                         const lines = [];
-                        let curLine = [items[0]];
+                        let cur = { y: items[0].y, runs: [items[0]] };
                         for (let i = 1; i < items.length; i++) {
-                            if (Math.abs(items[i].y - curLine[0].y) <= 3) {
-                                curLine.push(items[i]);
+                            const it = items[i];
+                            if (Math.abs(it.y - cur.y) <= yTol) {
+                                cur.runs.push(it);
                             } else {
-                                curLine.sort((a, b) => a.x - b.x);
-                                lines.push(curLine);
-                                curLine = [items[i]];
+                                lines.push(cur);
+                                cur = { y: it.y, runs: [it] };
                             }
                         }
-                        curLine.sort((a, b) => a.x - b.x);
-                        lines.push(curLine);
+                        lines.push(cur);
 
+                        // For each line: sort left->right and insert spaces based on gaps.
+                        const lineTexts = lines.map(line => {
+                            const runs = line.runs.sort((a, b) => a.x - b.x);
+                            if (runs.length === 0) return { y: line.y, text: '' };
+
+                            const gapThreshold = Math.max(2.5, medianCharW * 0.6);
+                            let out = runs[0].text;
+                            let prev = runs[0];
+                            for (let i = 1; i < runs.length; i++) {
+                                const r = runs[i];
+                                const prevEnd = prev.x + (prev.w || (prev.charW * prev.text.length) || 0);
+                                const gap = r.x - prevEnd;
+                                if (gap > gapThreshold && !out.endsWith(' ') && !r.text.startsWith(' ')) out += ' ';
+                                out += r.text;
+                                prev = r;
+                            }
+                            out = out.replace(/\s+/g, ' ').trim();
+                            return { y: line.y, text: out };
+                        }).filter(l => l.text.length > 0);
+
+                        // Detect simple multi-column layouts by looking at the distribution of line starts.
+                        const starts = lines
+                            .map(line => {
+                                const runs = line.runs.sort((a, b) => a.x - b.x);
+                                return runs.length ? runs[0].x : null;
+                            })
+                            .filter(v => typeof v === 'number')
+                            .sort((a, b) => a - b);
+                        const p10 = starts.length ? starts[Math.floor(starts.length * 0.1)] : 0;
+                        const p90 = starts.length ? starts[Math.floor(starts.length * 0.9)] : 0;
+                        const twoColLikely = (p90 - p10) > (viewport.width * 0.35);
+                        const splitX = viewport.width * 0.52;
+
+                        let ordered;
+                        if (twoColLikely) {
+                            const left = [];
+                            const right = [];
+                            for (const line of lines) {
+                                const runs = line.runs.sort((a, b) => a.x - b.x);
+                                if (!runs.length) continue;
+                                const startX = runs[0].x;
+                                const text = lineTexts.find(t => t.y === line.y)?.text || '';
+                                if (!text) continue;
+                                (startX < splitX ? left : right).push({ y: line.y, text });
+                            }
+                            left.sort((a, b) => b.y - a.y);
+                            right.sort((a, b) => b.y - a.y);
+                            ordered = [...left, ...right];
+                        } else {
+                            ordered = [...lineTexts].sort((a, b) => b.y - a.y);
+                        }
+
+                        // Paragraph breaks from vertical gaps + text cues.
                         const gaps = [];
-                        for (let i = 1; i < lines.length; i++) {
-                            gaps.push(lines[i - 1][0].y - lines[i][0].y);
-                        }
-                        const avgGap = gaps.length > 0
-                            ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
+                        for (let i = 1; i < ordered.length; i++) gaps.push(ordered[i - 1].y - ordered[i].y);
+                        const avgGap = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 10;
+                        const paraGap = Math.max(avgGap * 1.35, yTol * 2.2);
 
-                        const textLines = [];
-                        for (let i = 0; i < lines.length; i++) {
-                            textLines.push(lines[i].map(it => it.text).join(' '));
-                            if (i < lines.length - 1) {
-                                const gap = lines[i][0].y - lines[i + 1][0].y;
-                                if (gap > avgGap * 1.5) textLines.push('');
+                        const outLines = [];
+                        for (let i = 0; i < ordered.length; i++) {
+                            const t = ordered[i].text;
+                            outLines.push(t);
+                            if (i < ordered.length - 1) {
+                                const gap = ordered[i].y - ordered[i + 1].y;
+                                const next = ordered[i + 1].text;
+                                const looksLikeParaStart = next && /^[A-Z“"(\[]/.test(next) && !/^[a-z]/.test(next);
+                                if (gap > paraGap || looksLikeParaStart) outLines.push('');
                             }
                         }
-                        extractedText = textLines.join('\n');
+
+                        extractedText = outLines.join('\n');
+                        extractedText = postProcessExtractedText(extractedText);
                     }
                 }
             } catch (e) {
@@ -293,8 +435,22 @@
                 }
             }
 
-            extractedTextDisplay.textContent = extractedText;
+            extractedTextDisplay.textContent = postProcessExtractedText(extractedText);
             renderExistingAnnotations();
+        }
+
+        function postProcessExtractedText(text) {
+            if (!text) return '';
+            let t = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            // De-hyphenate common line-break hyphenation: "exam-\nple" -> "example"
+            t = t.replace(/([A-Za-z])-\n([A-Za-z])/g, '$1$2');
+            // Fix stray spaces before punctuation.
+            t = t.replace(/\s+([,.;:!?])/g, '$1');
+            // Normalize repeated spaces but keep paragraph breaks.
+            t = t.split('\n').map(line => line.replace(/[ \t]+/g, ' ').trimEnd()).join('\n');
+            // Collapse 3+ blank lines.
+            t = t.replace(/\n{3,}/g, '\n\n');
+            return t.trimEnd();
         }
 
         // --- Navigation ---
@@ -307,10 +463,6 @@
         }
         function onPrevPage() { if (pageNum > 1) { pageNum--; queueRenderPage(pageNum); } }
         function onNextPage() { if (pageNum < pdfDoc.numPages) { pageNum++; queueRenderPage(pageNum); } }
-        function togglePdfVisibility() {
-            pdfViewer.classList.toggle('hidden');
-            togglePdfBtn.textContent = pdfViewer.classList.contains('hidden') ? 'Show PDF' : 'Hide PDF';
-        }
 
         // --- Annotations ---
         function saveAnnotations(a) { localStorage.setItem(`annotations_${filename}`, JSON.stringify(a)); }
@@ -406,7 +558,12 @@
             pdfDoc = doc;
             pageCountSpan.textContent = pdfDoc.numPages;
             pageNumInput.max = pdfDoc.numPages;
+            // Resume last page when available.
+            const saved = parseInt(localStorage.getItem(lastPageKey) || '1', 10);
+            if (Number.isFinite(saved) && saved >= 1 && saved <= pdfDoc.numPages) pageNum = saved;
             renderPage(pageNum);
+            setMode(currentMode);
+            upsertRecentDoc({ filename, lastPage: pageNum });
         }).catch(err => {
             extractedTextDisplay.textContent = `Error loading PDF: ${err.message}`;
         });

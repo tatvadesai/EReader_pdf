@@ -33,6 +33,57 @@ h1 {
 
 .subtitle { font-size: 1.1em; color: #888; }
 
+/* === Library (recents) === */
+.library {
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 16px;
+    padding: 16px;
+    margin: 0 auto 18px;
+    text-align: left;
+}
+.library-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+.library-title {
+    font-size: 1.05em;
+    margin: 0;
+    color: #222;
+    letter-spacing: -0.01em;
+}
+.link-btn {
+    background: none;
+    border: none;
+    color: #007aff;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 8px;
+}
+.link-btn:hover { background: rgba(0, 122, 255, 0.08); }
+.library-list { display: flex; flex-direction: column; gap: 8px; }
+.library-item {
+    display: block;
+    text-decoration: none;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    padding: 12px 12px;
+    color: inherit;
+    transition: transform 0.05s, border-color 0.15s, background-color 0.15s;
+}
+.library-item:hover {
+    border-color: #d6e8ff;
+    background: #f6fbff;
+    transform: translateY(-1px);
+}
+.library-name { font-weight: 650; color: #222; }
+.library-meta { font-size: 0.85em; color: #888; margin-top: 4px; }
+.library-hint { margin: 10px 0 0; font-size: 0.85em; color: #888; }
+
 .upload-box {
     background-color: #fff;
     border: 2px dashed #d0d0d0;
@@ -114,6 +165,29 @@ h1 {
 .pdf-controls button:hover {
     background-color: #f0f0f0;
     border-color: #bbb;
+}
+
+/* --- Mode toggle (segmented control) --- */
+.mode-toggle {
+    display: inline-flex;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #fff;
+}
+.mode-toggle button {
+    border: none;
+    border-right: 1px solid #e7e7e7;
+    border-radius: 0;
+    padding: 6px 12px;
+    font-weight: 700;
+}
+.mode-toggle button:last-child { border-right: none; }
+.mode-toggle button:hover { background: #f5f5f5; }
+.mode-toggle button.active {
+    background: #111;
+    color: #fff;
+    border-color: #111;
 }
 
 .page-nav {
@@ -280,6 +354,9 @@ body.theme-sepia .btn-group button, body.theme-sepia .settings-row button {
 }
 body.theme-sepia .settings-row select { background: #faf4e8; color: #6b5b47; border-color: #d6c9b0; }
 body.theme-sepia .reading-area .content { color: #433422; }
+body.theme-sepia .mode-toggle { background: #faf4e8; border-color: #d6c9b0; }
+body.theme-sepia .mode-toggle button { background: transparent; color: #6b5b47; }
+body.theme-sepia .mode-toggle button.active { background: #6b5b47; color: #faf4e8; }
 
 /* Dark */
 body.theme-dark { background-color: #1a1a1a; color: #d4d4d4; }
@@ -308,3 +385,6 @@ body.theme-dark #pdf-canvas { border-color: #333; }
 body.theme-dark .reading-area .content { color: #d4d4d4; }
 body.theme-dark .highlighted-text { background-color: rgba(255, 220, 80, 0.2); }
 body.theme-dark .highlighted-text.has-note { border-bottom-color: rgba(100, 140, 255, 0.5); }
+body.theme-dark .mode-toggle { background: #2a2a2a; border-color: #444; }
+body.theme-dark .mode-toggle button { background: transparent; color: #bbb; border-right-color: #444; }
+body.theme-dark .mode-toggle button.active { background: #eee; color: #111; }
